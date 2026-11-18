@@ -19,5 +19,20 @@ def iniciar_modo_monitor(interfaz: str) -> str:
     if "monitor mode enabled" not in salida:
         raise RuntimeError("No se pudo activar el modo monitor. Revisa la salida arriba.")
     
-    interfaz_monitor = f"{interfaz}mon"
-    return interfaz_monitor
+    return _buscar_interfaz_en_modo_monitor()
+
+def _buscar_interfaz_en_modo_monitor() -> str:
+    # Corre 'iw dev' y recorre su salida buscando cuál interfaz está actualmente en modo monitor.
+    
+    resultado = subprocess.run(["iw", "dev"], capture_output=True, text=True)
+    salida = resultado.stdout
+
+    nombre_actual = None
+    for linea in salida.splitlines():
+        linea = linea.strip()
+        if linea.startswith("Interface"):
+            nombre_actual = linea.split()[1]
+        elif linea.startswith("type monitor") and nombre_actual:
+            return nombre_actual
+
+    raise RuntimeError("No se encontró ninguna interfaz en modo monitor.")
