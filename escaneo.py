@@ -42,7 +42,7 @@ def _parsear_csv_redes(ruta_csv: str) -> list:
         with open(ruta_csv, "r", encoding="utf-8", errors="replace") as archivo:
             contenido = archivo.read()
         
-        tabla_redes, tabla_clientes = contenido.split("\r\n\r\n")[:2]
+        tabla_redes, tabla_clientes = contenido.split("\n\n")[:2]
         
         lector_redes = csv.DictReader(tabla_redes.splitlines())
         for fila in lector_redes:
