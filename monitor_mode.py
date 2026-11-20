@@ -15,9 +15,6 @@ def iniciar_modo_monitor(interfaz: str) -> str:
     salida = resultado.stdout + resultado.stderr
     print(salida)
     
-    # Comprobación de que el modo monitor se haya activado correctamente
-    if "monitor mode enabled" not in salida:
-        raise RuntimeError("No se pudo activar el modo monitor. Revisa la salida arriba.")
     
     return _buscar_interfaz_en_modo_monitor()
 
