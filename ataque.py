@@ -93,48 +93,6 @@ def ruta_captura(archivo_salida: str = 'captura') -> str:
     return str(CARPETA_CAPTURAS / f'{archivo_salida}-01.cap')
 
 
-def _leer_pantalla_disponible(maestro: int) -> str:
-    fragmentos = []
-    while select.select([maestro], [], [], 0)[0]:
-        try:
-            datos = os.read(maestro, 65536)
-        except OSError:
-            break
-        if not datos:
-            break
-        fragmentos.append(datos.decode('utf-8', errors='replace'))
-    return ''.join(fragmentos)
-
-
-def desautenticar(interfaz_monitor: str, bssid: str, mac_cliente: str,
-                  cantidad_paquetes: int = 15):
-    """Compatibilidad con la importación del proyecto; no transmite desconexiones."""
-    raise RuntimeError(
-        'Esta versión comprueba capturas de forma pasiva y no envía desautenticaciones.'
-    )
-
-
-def esperar_handshake(archivo_cap: str, bssid: str, interfaz_monitor: str,
-                      mac_cliente: str, maestro_captura: int,
-                      intentos_maximos: int = 15, espera_segundos: int = 5,
-                      reenviar_cada: int = 4) -> bool:
-    """Espera la indicación de handshake en captura pasiva, sin desconectar clientes.
-
-    Conserva la firma usada en main.py. Los parámetros de cliente y reenvío se
-    mantienen por compatibilidad, pero no se usan para transmitir paquetes.
-    """
-    if intentos_maximos < 1 or espera_segundos <= 0:
-        raise ValueError('Intervalo o número de comprobaciones inválido')
-    pantalla = ''
-    for intento in range(intentos_maximos):
-        pantalla = (pantalla + _leer_pantalla_disponible(maestro_captura))[-16000:]
-        if re.search(r'WPA\s+handshake\s*:', pantalla, flags=re.IGNORECASE):
-            return True
-        print(f'Comprobación {intento + 1}/{intentos_maximos}: sin confirmación de handshake')
-        time.sleep(espera_segundos)
-    return False
-
-
 def detener_captura(proceso: subprocess.Popen, maestro: int) -> None:
     """Cierra la captura de forma ordenada y libera su terminal virtual.
 
