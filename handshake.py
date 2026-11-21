@@ -44,7 +44,7 @@ def interpretar_listado(salida: str, bssid: str | None = None) -> dict:
     }
 
 
-def confirmar_handshake(archivo_cap: str | Path, bssid: str | None = None, timeout: int = 30) -> dict:
+def confirmar_handshake(archivo_cap: str | Path, bssid: str | None = None, timeout: int = 80) -> dict:
     """Pide a Aircrack-ng que inspeccione un PCAP sin diccionario.
 
     Aircrack-ng puede terminar con código distinto de cero al no recibir -w;

