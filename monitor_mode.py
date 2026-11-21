@@ -1,37 +1,41 @@
-import subprocess #Librería para ejecutar comandos en terminal
+
+import subprocess
+
+
+def verificar_modo_monitor(interfaz: str) -> bool:
+    """Comprueba si la interfaz ya está en modo monitor."""
+
+    resultado = subprocess.run(
+        ["iw", "dev", interfaz, "info"],
+        capture_output=True,
+        text=True,
+        check=False
+    )
+
+    if resultado.returncode != 0:
+        raise RuntimeError(
+            f"No se pudo consultar {interfaz}: "
+            f"{resultado.stderr.strip()}"
+        )
+
+    return any(
+        linea.strip() == "type monitor"
+        for linea in resultado.stdout.splitlines()
+    )
 
 
 def iniciar_modo_monitor(interfaz: str) -> str:
-    print("Matando procesos que puedan interferir con el modo monitor (NetworkManager, wpa_supplicant)...")
-    subprocess.run(["sudo", "airmon-ng", "check", "kill"], capture_output=True, text=True)
-    
-    # Comando a ejecutar para iniciar el modo monitor en la terminal   
+    """Comprueba el estado de la interfaz inalámbrica."""
 
-    resultado = subprocess.run(
-        ["sudo", "airmon-ng", "start", interfaz],
-        capture_output=True,
-        text=True
+    print(f"Verificando interfaz {interfaz}...")
+
+    if verificar_modo_monitor(interfaz):
+        print(
+            f"[OK] {interfaz} ya está en modo monitor."
+        )
+        return interfaz
+
+    raise RuntimeError(
+        f"La interfaz {interfaz} no está en modo monitor. "
+        "Configúrala antes de continuar."
     )
-    
-    # Capturamos la salida del comando y la imprimimos en la terminal
-    salida = resultado.stdout + resultado.stderr
-    print(salida)
-    
-    
-    return _buscar_interfaz_en_modo_monitor()
-
-def _buscar_interfaz_en_modo_monitor() -> str:
-    # Corre 'iw dev' y recorre su salida buscando cuál interfaz está actualmente en modo monitor.
-    
-    resultado = subprocess.run(["iw", "dev"], capture_output=True, text=True)
-    salida = resultado.stdout
-
-    nombre_actual = None
-    for linea in salida.splitlines():
-        linea = linea.strip()
-        if linea.startswith("Interface"):
-            nombre_actual = linea.split()[1]
-        elif linea.startswith("type monitor") and nombre_actual:
-            return nombre_actual
-
-    raise RuntimeError("No se encontró ninguna interfaz en modo monitor.")
