@@ -219,30 +219,6 @@ def mostrar_resultado(tiempos: dict, diagnostico: dict | None,
     print("=" * 55)
 
 
-def contar_eapol_provisional(ruta: Path, timeout: float = 4.0) -> int | None:
-    """Cuenta EAPOL visibles en el PCAP mientras se escribe.
-
-    La lectura concurrente puede ser incompleta o fallar: None significa
-    «no disponible», nunca «cero». No confirma un handshake.
-    """
-    try:
-        if not ruta.is_file() or ruta.stat().st_size == 0:
-            return None
-        consulta = subprocess.run(
-            ["tshark", "-n", "-r", str(ruta), "-Y", "eapol",
-             "-T", "fields", "-e", "frame.number"],
-            capture_output=True, text=True, errors="replace",
-            stdin=subprocess.DEVNULL, timeout=timeout, check=False,
-        )
-        # Una lectura simultánea de un PCAP aún abierto puede devolver datos
-        # parciales o errores; no presentar esas lecturas como definitivas.
-        if consulta.returncode != 0:
-            return None
-        return len(consulta.stdout.splitlines())
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-
-
 def capturar_un_minuto(interfaz: str, bssid: str, canal: int,
                        duracion: int) -> tuple[Path, float]:
     """Captura durante 'duracion' segundos; el handshake se verifica al cerrar."""
@@ -315,7 +291,7 @@ def ejecutar_sesion(interfaz: str, duracion_escaneo: int = 30,
             print("[INFO] abre OTRA terminal y ejecuta este comando para forzar el handshake:")
             print(f"sudo aireplay-ng -0 10 --ignore-negative-one -a {bssid} {interfaz}")
             print("[INFO] Si no funciona, puedes probar con este comando alternativo pero será más agresivo:")
-            print(f"sudo aireplay-ng -0 10 --ignore-negative-one -a {bssid} {interfaz}")
+            print(f"sudo aireplay-ng -0 0 --ignore-negative-one -a {bssid} {interfaz}")
         
         print("[INFO] La captura comenzará enseguida y durará un minuto.")
 
@@ -352,9 +328,9 @@ def ejecutar_sesion(interfaz: str, duracion_escaneo: int = 30,
         return True
     finally:
         with proteger_cierre():
-            eliminados = limpiar_temporales()
-        if eliminados:
-            print(f"[INFO] Eliminados {eliminados} archivos temporales de esta sesión.")
+            carpeta_guardada = archivar_captura(datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+        if carpeta_guardada is not None:
+            print(f"[INFO] Captura guardada para depuración en: {carpeta_guardada}")
 
 
 def argumentos():
