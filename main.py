@@ -260,9 +260,14 @@ def ejecutar_sesion(interfaz: str, duracion_escaneo: int = 30,
             print("MAC del dispositivo seleccionado: Ninguno")
         print("[INFO] La selección del cliente es informativa; la captura permanece pasiva.")
         
-        print(f"Ejecute el comando:")
-        print(f"sudo aireplay-ng -0 15 -a {bssid} -c {estacion_seleccionada} {interfaz}")
-        print(f"en otra terminal para generar tráfico.")
+        if estacion_seleccionada:
+            print("\n[INFO] Cuando empiece la captura (verás 'Captura pasiva durante 60 segundos'),")
+            print("[INFO] abre OTRA terminal y ejecuta este comando para forzar el handshake:")
+            print(f"sudo aireplay-ng -0 15 --ignore-negative-one -a {bssid} -c {estacion_seleccionada} {interfaz}")
+        else:
+            print("\n[INFO] Cuando empiece la captura (verás 'Captura pasiva durante 60 segundos'),")
+            print("[INFO] abre OTRA terminal y ejecuta este comando para forzar el handshake:")
+            print(f"sudo aireplay-ng -0 15 --ignore-negative-one -a {bssid} {interfaz}")
         
         print("[INFO] La captura comenzará enseguida y durará un minuto.")
 
