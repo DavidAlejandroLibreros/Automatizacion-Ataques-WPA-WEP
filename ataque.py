@@ -34,7 +34,7 @@ def desautenticar(interfaz_monitor: str, bssid: str, mac_cliente: str, cantidad_
 
 
 def esperar_handshake(archivo_cap: str, bssid: str, interfaz_monitor: str, mac_cliente: str,
-                       intentos_maximos: int = 15, espera_segundos: int = 5, reenviar_cada: int = 2) -> bool:
+                       intentos_maximos: int = 15, espera_segundos: int = 5, reenviar_cada: int = 4) -> bool:
 
     diccionario_temporal = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
     diccionario_temporal.write("clave_de_prueba\n")

@@ -2,6 +2,8 @@ import subprocess #Librería para ejecutar comandos en terminal
 
 
 def iniciar_modo_monitor(interfaz: str) -> str:
+    print("Matando procesos que puedan interferir con el modo monitor (NetworkManager, wpa_supplicant)...")
+    subprocess.run(["sudo", "airmon-ng", "check", "kill"], capture_output=True, text=True)
     
     # Comando a ejecutar para iniciar el modo monitor en la terminal   
 
