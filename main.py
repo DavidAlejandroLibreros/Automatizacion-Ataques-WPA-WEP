@@ -17,7 +17,7 @@ import sys
 import time
 from pathlib import Path
 
-from monitor_mode import iniciar_modo_monitor
+from monitor_mode import iniciar_modo_monitor, listar_interfaces_wifi, matar_procesos_interferentes
 from escaneo import escanear_redes
 from ataque import (
     iniciar_captura_dirigida,
@@ -81,6 +81,35 @@ def limpiar_temporales() -> int:
             archivo.unlink()
             eliminados += 1
     return eliminados
+
+def resolver_interfaz(interfaz_pedida: str | None) -> str:
+    """Decide con qué antena trabajar.
+
+    Si el usuario pasó --interfaz, se respeta. Si no, se detecta
+    automáticamente la interfaz inalámbrica con 'iw dev'.
+    """
+    if interfaz_pedida:
+        print(f"[INFO] Interfaz indicada por el usuario: {interfaz_pedida}")
+        return interfaz_pedida
+
+    interfaces = listar_interfaces_wifi()
+    if not interfaces:
+        raise RuntimeError("No se detectó ninguna interfaz inalámbrica. ¿Está conectada la antena?")
+    # Si alguna ya está en modo monitor, se prefiere.
+    monitor = [i for i in interfaces if i["tipo"] == "monitor"]
+    candidatas = monitor or interfaces
+    if len(candidatas) == 1:
+        elegida = candidatas[0]
+        print(f"[INFO] Antena detectada automáticamente: {elegida['nombre']} (modo {elegida['tipo']})")
+        return elegida["nombre"]
+    # Si hay varias, que el usuario elija.
+    print("\nINTERFACES INALÁMBRICAS DETECTADAS")
+    for i, iface in enumerate(candidatas):
+        print(f"[{i}] {iface['nombre']} (modo {iface['tipo']})")
+    indice = seleccionar(len(candidatas), "Selecciona la antena a usar")
+    return candidatas[indice]["nombre"]
+
+
 
 
 def comprobar_dependencias() -> None:
@@ -256,9 +285,13 @@ def ejecutar_sesion(interfaz: str, duracion_escaneo: int = 30,
             print("\n[INFO] Cuando empiece la captura (verás 'Captura pasiva durante 60 segundos'),")
             print("[INFO] abre OTRA terminal y ejecuta este comando para forzar el handshake:")
             print(f"sudo aireplay-ng -0 10 --ignore-negative-one -a {bssid} -c {estacion_seleccionada} {interfaz}")
+            print("[INFO] Si no funciona, puedes probar con este comando alternativo pero será más agresivo:")
+            print(f"sudo aireplay-ng -0 0 --ignore-negative-one -a {bssid} -c {estacion_seleccionada} {interfaz}")
         else:
             print("\n[INFO] Cuando empiece la captura (verás 'Captura pasiva durante 60 segundos'),")
             print("[INFO] abre OTRA terminal y ejecuta este comando para forzar el handshake:")
+            print(f"sudo aireplay-ng -0 10 --ignore-negative-one -a {bssid} {interfaz}")
+            print("[INFO] Si no funciona, puedes probar con este comando alternativo pero será más agresivo:")
             print(f"sudo aireplay-ng -0 10 --ignore-negative-one -a {bssid} {interfaz}")
         
         print("[INFO] La captura comenzará enseguida y durará un minuto.")
@@ -303,7 +336,7 @@ def ejecutar_sesion(interfaz: str, duracion_escaneo: int = 30,
 
 def argumentos():
     parser = argparse.ArgumentParser(description="Laboratorio WPA/WPA2: auditoría desde cero")
-    parser.add_argument("--interfaz", default="wlan0")
+    parser.add_argument("--interfaz", default=None, help="Interfaz inalámbrica a usar (si no se indica, se detecta automáticamente)")
     parser.add_argument("--duracion-escaneo", type=int, default=60)
     parser.add_argument("--duracion-captura", type=int, default=60)
     args = parser.parse_args()
@@ -327,7 +360,8 @@ def main() -> int:
         if os.geteuid() != 0:
             raise PermissionError("Ejecuta el programa con sudo para capturar tráfico")
         comprobar_dependencias()
-        interfaz = iniciar_modo_monitor(args.interfaz)
+        interfaz_detectada = resolver_interfaz(args.interfaz)
+        interfaz = iniciar_modo_monitor(interfaz_detectada)
         while True:
             try:
                 confirmado = ejecutar_sesion(interfaz, args.duracion_escaneo, args.duracion_captura)

@@ -6,6 +6,24 @@ Kali Linux con la suite aircrack-ng. Requiere privilegios de root.
 """
 import subprocess
 import time
+import re
+
+def listar_interfaces_wifi() -> list[dict]:
+    """Lista las interfaces inalámbricas y su tipo usando 'iw dev'.
+
+    Devuelve, p. ej.: [{'nombre': 'wlan0', 'tipo': 'managed'}].
+    """
+    resultado = subprocess.run(["iw", "dev"], capture_output=True, text=True,
+                               check=False, timeout=10)
+    interfaces = []
+    for linea in resultado.stdout.splitlines():
+        texto = linea.strip()
+        coincidencia = re.match(r"Interface\s+(\S+)", texto)
+        if coincidencia:
+            interfaces.append({"nombre": coincidencia.group(1), "tipo": "desconocido"})
+        elif texto.startswith("type ") and interfaces:
+            interfaces[-1]["tipo"] = texto.split(None, 1)[1]
+    return interfaces
 
 
 def matar_procesos_interferentes() -> None:
