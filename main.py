@@ -16,6 +16,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from datetime import datetime
 
 from monitor_mode import iniciar_modo_monitor, listar_interfaces_wifi, matar_procesos_interferentes
 from escaneo import escanear_redes
@@ -81,6 +82,28 @@ def limpiar_temporales() -> int:
             archivo.unlink()
             eliminados += 1
     return eliminados
+
+
+def archivar_captura(marca: str) -> Path | None:
+    """Mueve los archivos de esta captura a su propia carpeta con fecha y hora.
+
+    Así cada intento queda guardado por separado para poder depurar handshakes.
+    Devuelve la carpeta creada, o None si no había nada que guardar.
+    """
+    origen = BASE / "capturas_ataque"
+    if origen.is_symlink() or not origen.is_dir():
+        return None
+    archivos = [a for a in origen.iterdir()
+                if a.is_file()
+                and a.name.startswith(PREFIJO + "-")
+                and a.name.endswith(SUFIJOS_TEMPORALES)]
+    if not archivos:
+        return None
+    destino = BASE / "capturas" / marca
+    destino.mkdir(parents=True, exist_ok=True)
+    for archivo in archivos:
+        archivo.rename(destino / archivo.name)
+    return destino
 
 def resolver_interfaz(interfaz_pedida: str | None) -> str:
     """Decide con qué antena trabajar.
