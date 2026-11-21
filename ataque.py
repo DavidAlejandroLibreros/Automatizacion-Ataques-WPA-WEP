@@ -1,92 +1,209 @@
+"""Gestión de capturas Wi-Fi de laboratorio y comprobación pasiva de handshake.
+
+No inicia desconexiones de clientes. Las capturas temporales se reemplazan al
+iniciar una nueva sesión, únicamente dentro de una carpeta dedicada.
+"""
+
+import os
+import pty
+import re
+import select
+import shutil
+import signal
 import subprocess
 import time
-import os
-import glob
-import pty
-import select
-import tempfile
+import threading
+from pathlib import Path
 
-ARCHIVO_LOG = "log_ataque.txt"
-
-
-def _registrar_log(texto: str):
-    with open(ARCHIVO_LOG, "a") as f:
-        f.write(texto)
-        if not texto.endswith("\n"):
-            f.write("\n")
+CARPETA_CAPTURAS = Path(__file__).resolve().parent / 'capturas_ataque'
+EXTENSIONES = ('.cap', '.csv', '.kismet.csv', '.kismet.netxml', '.log.csv', '.airodump.log')
+_LECTORES = {}
 
 
-def iniciar_captura_dirigida(interfaz_monitor: str, bssid: str, canal: str, archivo_salida: str = "captura"):
-    for archivo_viejo in glob.glob(f"{archivo_salida}-*"):
-        os.remove(archivo_viejo)
-    comando = ["sudo", "airodump-ng", interfaz_monitor, "--bssid", bssid, "-c", canal, "-w", archivo_salida]
+
+def _preparar_prefijo(nombre: str) -> Path:
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', nombre):
+        raise ValueError('El nombre de captura debe ser simple, sin rutas')
+    if CARPETA_CAPTURAS.is_symlink():
+        raise RuntimeError('La carpeta de capturas no puede ser un enlace simbólico')
+    CARPETA_CAPTURAS.mkdir(parents=True, exist_ok=True)
+    for archivo in CARPETA_CAPTURAS.iterdir():
+        if (archivo.is_file() or archivo.is_symlink()) and archivo.name.startswith(nombre + '-') and archivo.name.endswith(EXTENSIONES):
+            archivo.unlink()
+    return CARPETA_CAPTURAS / nombre
+
+
+def _validar_parametros(interfaz: str, bssid: str, canal: str) -> None:
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', interfaz):
+        raise ValueError('Interfaz inalámbrica inválida')
+    if not re.fullmatch(r'(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}', bssid):
+        raise ValueError('BSSID inválido')
+    if not str(canal).isdigit() or not 1 <= int(canal) <= 165:
+        raise ValueError('Canal inválido')
+
+
+def iniciar_captura_dirigida(interfaz_monitor: str, bssid: str, canal: str, archivo_salida: str = 'captura'):
+    """Inicia captura pasiva; retorna (proceso, maestro), como el código original."""
+    _validar_parametros(interfaz_monitor, bssid, str(canal))
+    if not shutil.which('airodump-ng'):
+        raise RuntimeError('No está instalado airodump-ng')
+    prefijo = _preparar_prefijo(archivo_salida)
+    comando = ['airodump-ng', '--bssid', bssid, '-c', str(canal),
+               '--output-format', 'pcap,csv', '--write-interval', '1',
+               '-w', str(prefijo), interfaz_monitor]
     maestro, esclavo = pty.openpty()
-    proceso = subprocess.Popen(comando, stdout=esclavo, stderr=esclavo, stdin=esclavo, close_fds=True)
-    os.close(esclavo)
-    return proceso, maestro  # ahora también devolvemos "maestro" para poder leer la pantalla
+    try:
+        proceso = subprocess.Popen(comando, stdin=subprocess.DEVNULL, stdout=esclavo,
+                                   stderr=esclavo, start_new_session=True)
+    except Exception:
+        os.close(maestro)
+        raise
+    finally:
+        os.close(esclavo)
+    # Consumir la salida de la terminal virtual continuamente: de lo contrario,
+    # el buffer del PTY puede llenarse y bloquear airodump-ng durante la captura.
+    # Guardamos además un registro para diagnosticar por qué no apareció el CAP.
+    registro = CARPETA_CAPTURAS / f'{archivo_salida}-airodump.log'
+    def vaciar_pty():
+        with registro.open('ab') as salida:
+            while True:
+                try:
+                    listo, _, _ = select.select([maestro], [], [], 0.5)
+                    if not listo:
+                        if proceso.poll() is not None:
+                            break
+                        continue
+                    datos = os.read(maestro, 65536)
+                    if not datos:
+                        break
+                    salida.write(datos)
+                    salida.flush()
+                except (OSError, ValueError):
+                    break
+    lector = threading.Thread(target=vaciar_pty, daemon=True)
+    _LECTORES[maestro] = lector
+    lector.start()
+    return proceso, maestro
 
 
-def desautenticar(interfaz_monitor: str, bssid: str, mac_cliente: str, cantidad_paquetes: int = 15):
-    comando = ["sudo", "aireplay-ng", "-0", str(cantidad_paquetes), "-a", bssid, "-c", mac_cliente, interfaz_monitor]
-    resultado = subprocess.run(comando, capture_output=True, text=True)
-    salida = resultado.stdout + resultado.stderr
-    print(salida)
-    _registrar_log(f"--- desautenticar() ---\n{salida}")
+def ruta_captura(archivo_salida: str = 'captura') -> str:
+    """Ruta compatible con el prefijo utilizado por iniciar_captura_dirigida."""
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', archivo_salida):
+        raise ValueError('Nombre de captura inválido')
+    return str(CARPETA_CAPTURAS / f'{archivo_salida}-01.cap')
 
 
 def _leer_pantalla_disponible(maestro: int) -> str:
-    # Lee lo que airodump-ng haya escrito en su "pantalla" (el pty), sin bloquear.
-    texto = ""
-    while True:
-        listo, _, _ = select.select([maestro], [], [], 0)
-        if not listo:
-            break
+    fragmentos = []
+    while select.select([maestro], [], [], 0)[0]:
         try:
-            fragmento = os.read(maestro, 4096)
+            datos = os.read(maestro, 65536)
         except OSError:
             break
-        if not fragmento:
+        if not datos:
             break
-        texto += fragmento.decode(errors="ignore")
-    return texto
+        fragmentos.append(datos.decode('utf-8', errors='replace'))
+    return ''.join(fragmentos)
 
 
-def esperar_handshake(archivo_cap: str, bssid: str, interfaz_monitor: str, mac_cliente: str, maestro_captura: int,
-                       intentos_maximos: int = 15, espera_segundos: int = 5, reenviar_cada: int = 4) -> bool:
+def desautenticar(interfaz_monitor: str, bssid: str, mac_cliente: str,
+                  cantidad_paquetes: int = 15):
+    """Compatibilidad con la importación del proyecto; no transmite desconexiones."""
+    raise RuntimeError(
+        'Esta versión comprueba capturas de forma pasiva y no envía desautenticaciones.'
+    )
 
-    diccionario_temporal = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
-    diccionario_temporal.write("clave_de_prueba\n")
-    diccionario_temporal.close()
 
-    pantalla_acumulada = ""
+def esperar_handshake(archivo_cap: str, bssid: str, interfaz_monitor: str,
+                      mac_cliente: str, maestro_captura: int,
+                      intentos_maximos: int = 15, espera_segundos: int = 5,
+                      reenviar_cada: int = 4) -> bool:
+    """Espera la indicación de handshake en captura pasiva, sin desconectar clientes.
+
+    Conserva la firma usada en main.py. Los parámetros de cliente y reenvío se
+    mantienen por compatibilidad, pero no se usan para transmitir paquetes.
+    """
+    if intentos_maximos < 1 or espera_segundos <= 0:
+        raise ValueError('Intervalo o número de comprobaciones inválido')
+    pantalla = ''
+    for intento in range(intentos_maximos):
+        pantalla = (pantalla + _leer_pantalla_disponible(maestro_captura))[-16000:]
+        if re.search(r'WPA\s+handshake\s*:', pantalla, flags=re.IGNORECASE):
+            return True
+        print(f'Comprobación {intento + 1}/{intentos_maximos}: sin confirmación de handshake')
+        time.sleep(espera_segundos)
+    return False
+
+
+def detener_captura(proceso: subprocess.Popen, maestro: int) -> None:
+    """Cierra la captura de forma ordenada y libera su terminal virtual.
+
+    SIGINT equivale a Ctrl+C; el proceso tiene ocasión de finalizar las
+    escrituras del PCAP antes de salir. Solo se fuerza si no responde.
+    """
+    try:
+        if proceso.poll() is None:
+            for senal, espera in ((signal.SIGINT, 8), (signal.SIGTERM, 3)):
+                try:
+                    os.killpg(proceso.pid, senal)
+                except ProcessLookupError:
+                    break
+                try:
+                    proceso.wait(timeout=espera)
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+            if proceso.poll() is None:
+                try:
+                    os.killpg(proceso.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proceso.wait(timeout=3)
+    finally:
+        lector = _LECTORES.pop(maestro, None)
+        if lector is not None:
+            lector.join(timeout=2)
+        try:
+            os.close(maestro)
+        except OSError:
+            pass
+
+
+def diagnosticar_pcap(archivo_cap: str) -> dict:
+    """Cuenta tramas y EAPOL en un archivo existente usando TShark.
+
+    No infiere que exista un handshake completo a partir de tramas EAPOL.
+    Acepta capturas truncadas y devuelve una advertencia para el informe.
+    """
+    archivo = Path(archivo_cap)
+    if not archivo.is_file() or archivo.stat().st_size == 0:
+        return {'tramas': 0, 'eapol': 0, 'truncado': False,
+                'error': 'No existe un PCAP no vacío'}
+    if not shutil.which('tshark'):
+        return {'tramas': None, 'eapol': None, 'truncado': False,
+                'error': 'TShark no está instalado'}
+
+    def consultar(filtro=None):
+        comando = ['tshark', '-n', '-r', str(archivo)]
+        if filtro:
+            comando += ['-Y', filtro]
+        comando += ['-T', 'fields', '-e', 'frame.number']
+        return subprocess.run(comando, capture_output=True, text=True, timeout=45)
 
     try:
-        for intento in range(intentos_maximos):
-            if intento % reenviar_cada == 0:
-                desautenticar(interfaz_monitor, bssid, mac_cliente)
-
-            # Igual que cuando lo haces a mano: miramos la pantalla de airodump-ng
-            pantalla_acumulada += _leer_pantalla_disponible(maestro_captura)
-            if "WPA handshake" in pantalla_acumulada:
-                print("¡Handshake capturado! (confirmado en la pantalla de airodump-ng)")
-                _registrar_log("Handshake detectado en la pantalla de airodump-ng.")
-                return True
-
-            # Respaldo: seguimos revisando también con aircrack-ng, por si acaso
-            resultado = subprocess.run(
-                ["aircrack-ng", "-b", bssid, "-w", diccionario_temporal.name, archivo_cap],
-                capture_output=True,
-                text=True
-            )
-            salida = resultado.stdout
-            if "Passphrase not in dictionary" in salida or "KEY FOUND" in salida:
-                print("¡Handshake capturado! (confirmado por aircrack-ng)")
-                _registrar_log("Handshake capturado (via aircrack-ng).")
-                return True
-
-            print(f"Intento {intento + 1}/{intentos_maximos}: aún no hay handshake, esperando...")
-            time.sleep(espera_segundos)
-        _registrar_log("No se logró capturar el handshake tras todos los intentos.")
-        return False
-    finally:
-        os.remove(diccionario_temporal.name)
+        todas = consultar()
+        eapol = consultar('eapol')
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {'tramas': None, 'eapol': None, 'truncado': False,
+                'error': str(exc)}
+    errores = '\n'.join((todas.stderr, eapol.stderr))
+    truncado = 'cut short' in errores.lower() or 'truncated' in errores.lower()
+    if (todas.returncode != 0 or eapol.returncode != 0) and not truncado:
+        return {'tramas': None, 'eapol': None, 'truncado': False,
+                'error': errores.strip() or 'TShark no pudo leer la captura'}
+    return {
+        'tramas': len(todas.stdout.splitlines()),
+        'eapol': len(eapol.stdout.splitlines()),
+        'truncado': truncado,
+        'error': None,
+    }
