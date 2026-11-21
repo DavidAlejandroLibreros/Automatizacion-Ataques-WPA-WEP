@@ -67,15 +67,16 @@ if __name__ == "__main__":
     inicio_captura = time.time()
 
     archivo_captura = "captura"
-    proceso_captura = iniciar_captura_dirigida(interfaz_monitor, red_elegida["bssid"], red_elegida["canal"])
-    time.sleep(10)  # más margen para que airodump-ng se asiente en el canal
+    proceso_captura, maestro_captura = iniciar_captura_dirigida(interfaz_monitor, red_elegida["bssid"], red_elegida["canal"])
+    time.sleep(10)
 
     archivo_cap = f"{archivo_captura}-01.cap"
     handshake_logrado = esperar_handshake(
         archivo_cap,
         red_elegida["bssid"],
         interfaz_monitor,
-        cliente_elegido["mac_cliente"]
+        cliente_elegido["mac_cliente"],
+        maestro_captura
     )
 
     proceso_captura.terminate()
